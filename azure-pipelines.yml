@@ -1,0 +1,88 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  terraformVersion: '1.5.0'
+  serviceConnection: 'snchnproj'
+
+stages:
+
+# ---------------------------
+# Stage 1: Terraform Init & Plan
+# ---------------------------
+- stage: Terraform_Plan
+  displayName: "Terraform Plan"
+  jobs:
+  - job: Plan
+    steps:
+
+    # Install Terraform
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: $(terraformVersion)
+
+    # Terraform Init
+    - task: AzureCLI@2
+      displayName: "Terraform Init"
+      inputs:
+        azureSubscription: 'snchnproj'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          terraform init
+
+    # Terraform Validate
+    - script: terraform validate
+      displayName: "Validate Terraform"
+
+    # Terraform Plan
+    - task: AzureCLI@2
+      displayName: "Terraform Plan"
+      inputs:
+        azureSubscription: 'snchnproj'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          terraform plan -out=tfplan
+
+    # Publish Plan Artifact
+    - publish: tfplan
+      artifact: tfplan
+
+# ---------------------------
+# Stage 2: Terraform Apply
+# ---------------------------
+- stage: Terraform_Apply
+  displayName: "Terraform Apply"
+  dependsOn: Terraform_Plan
+  condition: succeeded()
+  jobs:
+  - deployment: Apply
+    environment: 'prod'   # you can add approval here
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          # Install Terraform
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(terraformVersion)
+
+          # Download Plan Artifact
+          - download: current
+            artifact: tfplan
+
+          # Terraform Apply
+          - task: AzureCLI@2
+            displayName: "Terraform Apply"
+            inputs:
+              azureSubscription: 'snchnproj'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                terraform init
+                terraform apply -auto-approve
